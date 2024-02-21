@@ -11,8 +11,7 @@ import openpyxl
 import http.server
 import socketserver 
 import webbrowser
-from docx2python import docx2python
-
+import mammoth
 
 
 '''''''''''''''''''''''''''''''''
@@ -265,63 +264,70 @@ for td in soup.find_all('td'):
         td.decompose() 
 
 word_file_path = 'Xbrl Independent Auditor.docx'
-def extract_text_from_docx(file_path):
-    doc_html_result = docx2python(file_path, html = True)
-    text_content = ""
-    for page in doc_html_result.body[0][0][0]:
-        for paragraph in page:
-            for element in paragraph:
-                if not isinstance(element, dict) or ('type' in element and element['type'] != 'footer'):
-                    if isinstance(element, str):
-                        text_content += element       
-        text_content += '\n'     
-    doc_html_result.close()
-    return text_content
+# def extract_text_from_docx(file_path):
+#     doc_html_result = docx2python(file_path, html = True)
+#     text_content = ""
+#     for page in doc_html_result.body[0][0][0]:
+#         for paragraph in page:
+#             for element in paragraph:
+#                 if not isinstance(element, dict) or ('type' in element and element['type'] != 'footer'):
+#                     if isinstance(element, str):
+#                         text_content += element       
+#         text_content += '\n'     
+#     doc_html_result.close()
+#     return text_content
 
-word_text = extract_text_from_docx(word_file_path)
-# print(word_text)
+
+def extract_text_and_images_from_docx(file_path):
+    with open(file_path, "rb") as docx_file:
+        result = mammoth.convert_to_html(docx_file)
+        html = result.value  # Extracted HTML content
+        images = result.messages  # Extracted images, if any
+        return html, images
+word_text,images = extract_text_and_images_from_docx(word_file_path)
+print(word_text)
 html_in += soup.prettify("utf-8").decode("utf-8")
 
-word_text = re.sub(r'style="[^"]*"', '', word_text)
+# word_text = re.sub(r'style="[^"]*"', '', word_text)
 
-def add_paragraph_tags(html_input):
-    soup = BeautifulSoup(html_input, 'html.parser')
-    for line in soup.find_all(string=True):
-        if line.strip() and line.parent.name not in ['h3','h4','span','b','u','i']:
-            paragraphs = line.strip().split('\n') # Split text into paragraphs based on double newlines
-            for paragraph in paragraphs:
-                p_tag = soup.new_tag("p")
-                p_tag.string = paragraph.strip()
-                line.insert_before(p_tag) # Insert the <p> tag before the current line
-                line.insert_before("\n")  # Add a newline after the <p> tag for formatting 
-            line.extract()
-    return str(soup).replace('</p><i>','<i>').replace('</p>\n<i>','\n<i>').replace('</i><p>','</i>')
-    
+# def add_paragraph_tags(html_input):
+#     soup = BeautifulSoup(html_input, 'html.parser')
+#     for line in soup.find_all(string=True):
+#         if line.strip() and line.parent.name not in ['h3','h4','span','b','u','i']:
+#             paragraphs = line.strip().split('\n') # Split text into paragraphs based on double newlines
+#             for paragraph in paragraphs:
+#                 p_tag = soup.new_tag("p")
+#                 p_tag.string = paragraph.strip()
+#                 line.insert_before(p_tag) # Insert the <p> tag before the current line
+#                 line.insert_before("\n")  # Add a newline after the <p> tag for formatting 
+#             line.extract()
+#     return str(soup).replace('</p><i>','<i>').replace('</p>\n<i>','\n<i>').replace('</i><p>','</i>')
+# word_text = add_paragraph_tags(word_text)
 
-word_text = add_paragraph_tags(word_text)
-from docx import Document
-def extract_images(docx_file):
-    doc = Document(docx_file)
-    images = []
-    for rel in doc.part.rels.values():
-        if "image" in rel.reltype:
-            image_data = rel.target_part.blob
-            image_name = rel.target_ref[:]  # Get the image name
-            images.append((image_name, image_data))
-    return images
+# from docx import Document
+# def extract_images(docx_file):
+#     doc = Document(docx_file)
+#     images = []
+#     for rel in doc.part.rels.values():
+#         if "image" in rel.reltype:
+#             image_data = rel.target_part.blob
+#             image_name = rel.target_ref[:]  # Get the image name
+#             images.append((image_name, image_data))
+#     return images
 
-# Example usage
-images = extract_images(word_file_path)
-for idx, (image_name, image_data) in enumerate(images):
-    with open(f"{image_name}", "wb") as f:
-        f.write(image_data)
+# # Example usage
+# images = extract_images(word_file_path)
 
-def replace_image_placeholders(content):
-    pattern = r'----(.*?)----'
-    replaced_content = re.sub(pattern, r'<img src="\1" style="width:300px;" />', content)
-    return replaced_content
+# for idx, (image_name, image_data) in enumerate(images):
+    # with open(f"{image_name}", "wb") as f:
+    #     f.write(image_data)
 
-word_text = replace_image_placeholders(word_text)
+# def replace_image_placeholders(content):
+#     pattern = r'----(.*?)----'
+#     replaced_content = re.sub(pattern, r'<img src="\1" style="width:300px;" />', content)
+#     return replaced_content
+
+# word_text = replace_image_placeholders(word_text)
 
 ix_header = conf.ix_header_start + ix_header_content + conf.ix_header_end  +  '<ix:nonNumeric> \n <h2 align="center"> AUDITOR\'S REPORT </h2>  '+ word_text+'</ix:nonNumeric>'
 html_out = conf.new_header + '\n' + ix_header.replace("$place_id$", conf.place_id) + '\n<ix:nonNumeric> \n <h2 align="center"> FINANCIAL REPORT </h2> </ix:nonNumeric>'
@@ -338,15 +344,15 @@ html_out = html_out.replace("xbrli:enddate", "xbrli:endDate")
 
 os.remove("temp0")
 os.remove("temp")
-encoded_html_out = html_out.encode('utf-8')
-decoded_html_out = encoded_html_out.decode('utf-8') # Decode the encoded string using UTF-8 encoding
+# encoded_html_out = html_out.encode('utf-8')
+# decoded_html_out = encoded_html_out.decode('utf-8') # Decode the encoded string using UTF-8 encoding
 
 with open(output_file, 'w', encoding='utf-8') as f:
-    f.write(decoded_html_out)
+    f.write(html_out)
     print(f"Successfully converted to {output_file}")
 
 
-os.system('"C:\\Users\\Mitrah154\\Downloads\\arelle-win\\arelleCmdLine" -- file=D:\\Process-XBRL-main\\ca_clayton_2022.html --plugins EdgarRenderer')
+os.system('"C:\\Users\\Mitrah154\\Downloads\\arelle-win\\arelleCmdLine" -- file=C:\\Users\\Mitrah154\\Downloads\\Word Conversion\\ca_clayton_2022.html --plugins EdgarRenderer')
 os.system(f'"C:\\Users\\Mitrah154\\Downloads\\arelle-win\\arelleCmdLine" --plugins=ixbrl-viewer -f {output_file} --save-viewer {output_file}')
 
 handler = http.server.SimpleHTTPRequestHandler
